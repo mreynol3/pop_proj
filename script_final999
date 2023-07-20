@@ -1,0 +1,540 @@
+# source('/home/qo3/script_0.R')      # loading in the libraries
+# source('/home/qo3/script_1.R')
+# source('/home/qo3/script_3.R')
+
+
+K05_launch <- K05_pop[which(K05_pop$YEAR == launch_year),] %>%
+  group_by(STATE, COUNTY, GEOID, YEAR, RACE, SEX) %>%
+  dplyr::summarise(POPULATION = sum(POPULATION)) %>%
+  ungroup()
+
+
+files <- paste0("/home/qo3/", list.files(path = "/home/qo3/",pattern = "COUNTY_20152100"))
+temp <- lapply(files, fread, sep=" ")
+z <- rbindlist( temp ) %>%
+  # dplyr::rename(YEAR = V3,
+  #               SEX = V4,
+  #               COUNTYRACE = V5,
+  #               TYPE = V6,
+  #               AGE = V7,
+  #               A = V8,
+  #               B = V9,
+  #               C = V10,
+  #               Var1 = V2) %>%
+  mutate(STATE= substr(COUNTYRACE, 1,2),
+         COUNTY = substr(COUNTYRACE, 3,5),
+         GEOID = paste0(STATE, COUNTY),
+         A = as.numeric(A),
+         B = as.numeric(B),
+         C = as.numeric(C),
+         A = if_else(A<0, 0, A),
+         B = if_else(B<0, 0, B),
+         C = if_else(C<0,0, C),
+         RACE = substr(COUNTYRACE, 7,7))
+z[is.na(z)] <-0
+basesum <-  K05_launch[which( K05_launch$YEAR == launch_year),] %>%
+  dplyr::select(STATE, COUNTY, GEOID, POPULATION, RACE)
+
+addsum <- z[which(z$TYPE=="ADD" & z$YEAR == (launch_year+FORLEN)),] %>%
+  group_by(STATE, COUNTY, GEOID, RACE, TYPE) %>%
+  dplyr::summarise(A = sum(A))
+
+addmult <- left_join(addsum, basesum) %>%
+  mutate(COMBINED = if_else(A>= POPULATION, "ADD" ,"Mult")) %>%
+  dplyr::select(STATE, COUNTY, GEOID, RACE, COMBINED)
+
+
+basesum2 <-  K05_launch[which( K05_launch$YEAR == launch_year),] %>%
+  dplyr::select(STATE, COUNTY, GEOID, POPULATION, RACE) %>%
+  group_by(GEOID, RACE) %>%
+  dplyr::summarise(poptot = sum(POPULATION))
+
+combined<- left_join(z, addmult) %>%
+  filter(TYPE == COMBINED) %>%
+  mutate(TYPE = "ADDMULT") %>%
+  dplyr::select(-COMBINED)
+
+ K05_launch2$SEX <- as.numeric(K05_launch2$SEX)
+ z2$SEX <- as.numeric(z2$SEX)
+
+z2<- rbind(z, combined) %>%
+  dplyr::select(-V1)
+z2<-  left_join(as.data.frame(z2), as.data.frame(K05_launch2))
+z2<- left_join(z2, countynames)
+z2[is.na(z2)] <-0
+z2<- filter(z2,
+            !GEOID %in% c("02900", "04910", "15900", "35910", "36910", "51910", "51911","51911", "51913", "51914", "51915", "51916", "51918"))
+z3 <- filter(z2,
+             TYPE == "ADDMULT")
+
+totals <- z3 %>%
+  group_by(AGE, SEX, YEAR) %>%
+  dplyr::summarise(poptot = sum(A)) 
+totals2 <- left_join(z3, totals) %>%
+  mutate(percentage = (A/poptot))
+
+library(ddply)
+
+years_break <- subset(totals2, select=c("YEAR", "pop"))
+years_b <- aggregate(.~ YEAR, data = years_break, FUN=sum)
+
+ggplot(years_b, aes(x=YEAR, y=pop)) +
+  geom_line()
+
+write_csv(totals2, "/home/qo3/totalpop.csv")
+
+library(dplyr)
+
+a<- get_acs(geography = "county",
+            variables = "B19013_001",
+            geometry = TRUE, shift_geo = TRUE)
+  
+totals2$pop <- (totals2$poptot * totals2$percentage)
+
+
+totalpop_2020 <- totals2 %>%
+  filter(YEAR == '2020') %>%
+  group_by(COUNTY, STATE, GEOID, RACE) %>%
+  summarise(pop = sum(pop))
+
+
+counties_2020 <- merge(x=a,y=totalpop_2020, 
+                       by="GEOID", all.x=TRUE)
+
+
+counties_2020$NAME <- counties_2020$NAME %>%               # Application of separate_rows() function
+  separate_rows(label, c('COUNTY_NAME', 'STATE_NAME'), sep=",")
+
+counties_2020[c('COUNTY_NAME', 'STATE_NAME')] <- str_split_fixed(counties_2020$NAME, ',', 2)
+counties_2050[c('COUNTY_NAME', 'STATE_NAME')] <- str_split_fixed(counties_2050$NAME, ',', 2)
+counties_2075[c('COUNTY_NAME', 'STATE_NAME')] <- str_split_fixed(counties_2050$NAME, ',', 2)
+counties_2100[c('COUNTY_NAME', 'STATE_NAME')] <- str_split_fixed(counties_2100$NAME, ',', 2)
+
+
+
+ggplot(counties_2020, aes(x=STATE, y=pop)) +
+  geom_line(color = 'red', size = 2, alpha = 0.9) +
+  ggtitle("Population by State, 2020") +
+  xlab('State') +
+  ylab('Population')
+
+
+# ==== 2050 ====
+
+totalpop_2050 <- totals2 %>%
+  filter(YEAR == '2050') %>%
+  group_by(COUNTY, STATE, GEOID) %>%
+  summarise(pop = sum(pop))
+
+
+counties_2050 <- merge(x=a,y=totalpop_2050, 
+                       by="GEOID", all.x=TRUE)
+
+
+
+# ==== 2075 ====
+
+totalpop_2075 <- totals2 %>%
+  filter(YEAR == '2075') %>%
+  group_by(COUNTY, STATE, GEOID) %>%
+  summarise(pop = sum(pop))
+
+
+counties_2075 <- merge(x=a,y=totalpop_2075, 
+                       by="GEOID", all.x=TRUE)
+
+
+
+# ==== 2100 ====
+  
+totalpop_2100 <- totals2 %>%
+  filter(YEAR == '2100') %>%
+  group_by(COUNTY, STATE, GEOID) %>%
+  summarise(pop = sum(pop))
+
+
+counties_2100 <- merge(x=a,y=totalpop_2100, 
+                       by="GEOID", all.x=TRUE)
+
+
+# mapping
+library(RColorBrewer)
+
+counties_2020$newpop <- as.numeric(counties_2020$pop)
+counties_2050$newpop <- as.numeric(counties_2050$pop)
+counties_2075$newpop <- as.numeric(counties_2075$pop)
+counties_2100$newpop <- as.numeric(counties_2100$pop)
+
+
+counties_2020$newpop <- cut(counties_2020$newpop, include.lowest=FALSE,
+                             breaks=c(0, 1000, 2000, 3000, 5000,10000, 20000, 50000,100000, 250000, 500000, 750000, 1000000, 3000000, 8000000, 9000000),
+                             labels=c('0 to 1,000', '1,000 to 2,000', '2,000 to 3,000', '3,000 to 5,000','5,000 to 10,000', '10,000 to 20,000', '20,000 to 50,000', '50,000 to 100,000', 
+                                      '100,000 to 250,000', '250,000 to 500,000', '500,000 to 750,000', '750,000 to 1,000,000', 
+                                      '1,000,000 to 3,000,000', '3,000,000 to 8,000,000', '8,000,000+'))
+
+ggplot(data = counties_2020) +
+  geom_sf(aes(fill = newpop)) +
+  scale_fill_manual(name="Total Population",
+                    values=c('#afff9a', '#b4f686', '#baec71', '#c0e25d', '#c7d849', '#cdcd35', '#d4c11f', '#dab500', '#e1a800', '#e79b00', '#ec8d00', 
+                             '#f27d00', '#f66c00', '#fa5800', '#fd4007', '#ff1a1a'),
+                    guide=guide_legend(reverse=TRUE)) +
+  labs(title = 'United States Population by County, 2020')
+
+counties_2050$newpop <- cut(counties_2050$newpop, include.lowest=FALSE,
+                            breaks=c(0, 1000, 2000, 3000, 5000,10000, 20000, 50000,100000, 250000, 500000, 750000, 1000000, 3000000, 8000000, 9000000),
+                            labels=c('0 to 1,000', '1,000 to 2,000', '2,000 to 3,000', '3,000 to 5,000','5,000 to 10,000', '10,000 to 20,000', '20,000 to 50,000', '50,000 to 100,000', 
+                                     '100,000 to 250,000', '250,000 to 500,000', '500,000 to 750,000', '750,000 to 1,000,000', 
+                                     '1,000,000 to 3,000,000', '3,000,000 to 8,000,000', '8,000,000+'))
+
+ggplot(data = counties_2050) +
+  geom_sf(aes(fill = newpop)) +
+  scale_fill_manual(name="Total Population",
+                    values=c('#afff9a', '#b4f686', '#baec71', '#c0e25d', '#c7d849', '#cdcd35', '#d4c11f', '#dab500', '#e1a800', '#e79b00', '#ec8d00', 
+                             '#f27d00', '#f66c00', '#fa5800', '#fd4007', '#ff1a1a'),
+                    guide=guide_legend(reverse=TRUE)) +
+  labs(title = 'United States Population by County, 2050')
+
+counties_2075$newpop <- cut(counties_2075$newpop, include.lowest=FALSE,
+                            breaks=c(0, 1000, 2000, 3000, 5000,10000, 20000, 50000,100000, 250000, 500000, 750000, 1000000, 3000000, 8000000, 9000000),
+                            labels=c('0 to 1,000', '1,000 to 2,000', '2,000 to 3,000', '3,000 to 5,000','5,000 to 10,000', '10,000 to 20,000', '20,000 to 50,000', '50,000 to 100,000', 
+                                     '100,000 to 250,000', '250,000 to 500,000', '500,000 to 750,000', '750,000 to 1,000,000', 
+                                     '1,000,000 to 3,000,000', '3,000,000 to 8,000,000', '8,000,000+'))
+
+ggplot(data = counties_2075) +
+  geom_sf(aes(fill = newpop)) +
+  scale_fill_manual(name="Total Population",
+                    values=c('#afff9a', '#b4f686', '#baec71', '#c0e25d', '#c7d849', '#cdcd35', '#d4c11f', '#dab500', '#e1a800', '#e79b00', '#ec8d00', 
+                             '#f27d00', '#f66c00', '#fa5800', '#fd4007', '#ff1a1a'),
+                    guide=guide_legend(reverse=TRUE)) +
+  labs(title = 'United States Population by County, 2075')
+
+counties_2100$newpop <- cut(counties_2100$newpop, include.lowest=FALSE,
+                            breaks=c(0, 1000, 2000, 3000, 5000,10000, 20000, 50000,100000, 250000, 500000, 750000, 1000000, 3000000, 8000000, 9000000),
+                            labels=c('0 to 1,000', '1,000 to 2,000', '2,000 to 3,000', '3,000 to 5,000','5,000 to 10,000', '10,000 to 20,000', '20,000 to 50,000', '50,000 to 100,000', 
+                                     '100,000 to 250,000', '250,000 to 500,000', '500,000 to 750,000', '750,000 to 1,000,000', 
+                                     '1,000,000 to 3,000,000', '3,000,000 to 8,000,000', '8,000,000+'))
+
+ggplot(data = counties_2100) +
+  geom_sf(aes(fill = newpop)) +
+  scale_fill_manual(name="Total Population",
+                    values=c('#afff9a', '#b4f686', '#baec71', '#c0e25d', '#c7d849', '#cdcd35', '#d4c11f', '#dab500', '#e1a800', '#e79b00', '#ec8d00', 
+                             '#f27d00', '#f66c00', '#fa5800', '#fd4007', '#ff1a1a'),
+                    guide=guide_legend(reverse=TRUE)) +
+  labs(title = 'United States Population by County, 2100')
+
+
+
+# ggplot(data = counties_2020) +
+#   geom_sf(aes(fill = pop)) +
+#   scale_fill_gradient2(low = 'green', mid = 'yellow', high = 'red', midpoint = log(870.85), space = "Lab", trans = 'log',
+#                        name = "Total Population") +
+#   labs( title = 'United States Population by County, 2020')
+# 
+# ggplot(data = counties_2050) +
+#   geom_sf(aes(fill = pop)) +
+#   scale_fill_gradient2(low = 'green', mid = 'yellow', high = 'red', midpoint = log(870.85), space = "Lab", trans = 'log',
+#                        name = "Total Population") +
+#   labs( title = 'United States Population by County, 2050')
+# 
+# ggplot(data = counties_2075) +
+#   geom_sf(aes(fill = pop)) +
+#   scale_fill_gradient2(low = 'green', mid = 'yellow', high = 'red', midpoint = log(870.85), space = "Lab", trans = 'log',
+#                        name = "Total Population") +
+#   labs( title = 'United States Population by County, 2075')
+# 
+# ggplot(data = counties_2100) +
+#   geom_sf(aes(fill = pop)) +
+#   scale_fill_gradient2(low = 'green', mid = 'yellow', high = 'red', midpoint = log(870.85), space = "Lab", trans = 'log',
+#                        name = "Total Population") +
+#   labs( title = 'United States Population by County, 2100')
+
+
+# === difference map ===
+
+counties_base <- counties_2020[c('COUNTY','STATE', 'COUNTY_NAME', 'STATE_NAME','GEOID')]
+counties_base$change <- (counties_2100$pop - counties_2020$pop)
+
+counties_base[is.na(counties_base)] <-0
+
+
+# map the diff
+
+describe(counties_base$change)
+
+counties_base$changed <- cut(counties_base$change, include.lowest=FALSE,
+                breaks=c(-57938.1, -30000, -15000, -7500, 0, 7500, 15000, 30000, 60000, 100000, 1000000, 6000000),
+                labels = c('-57938.1', '-15,000 to -30,000', '-7,500 to -15,000', '0 to -7,500', '0 to 7,500', '7,500 to 15,000', '15,00 to 30,000', '30,000 to 60,000', '60,000 to 100,000', '100,000 to 1,000,000', '+5,000,000'))
+
+cities <- read_sf('/home/qo3/USA_Major_Cities.shp')
+describe(cities$POPULATION)
+
+cities <- cities[cities$POPULATION > 700000,]
+class(cities)
+
+cities <- cities[c('NAME', 'geometry', 'ST')]
+cities <- cities[cities$ST != 'AK' & cities$ST != "HI", ]
+
+
+ggplot(data = counties_base) +
+  geom_sf(aes(fill = changed)) +
+  # geom_sf(data = cities, size = 0.1, color = 'yellow') +
+  scale_fill_gradient2(low = 'green', mid = 'yellow', high = 'red', midpoint = log(870.85), space = "Lab", trans = 'log',
+                       name = "Total Population") +
+  scale_fill_manual(name="Population Change",
+                    values=c("#168D8B", "#1EC2BF", "#85ECEA", "#A7F1F0", "#DDE2F8",  "#BBC5F2", "#BAC6F3", "#99A8EB", "#778BE4", "#516ADD", "#3351D7"),
+                    guide=guide_legend(reverse=TRUE)) +
+  labs(title = 'Total Change in Population by County, 2020 to 2100')
+
+p <- p +
+  geom_sf_text(data = cities, aes(label = NAME), color = "white", size = 3)
+print(p)
+
+
+# Plot the bar chart 
+
+state_2020 <- counties_2020 %>%
+  group_by(STATE_NAME)%>%
+  summarise(pop = sum(pop))
+
+state_2050 <- counties_2050 %>%
+  group_by(STATE_NAME)%>%
+  summarise(pop = sum(pop))
+
+state_2100 <- counties_2100 %>%
+  group_by(STATE_NAME)%>%
+  summarise(pop = sum(pop))
+
+
+barplot(state_2020$pop,names.arg=state_2020$STATE_NAME, las = 2,  ylim = c(0,40000000), col="#548235",
+        main="Population by State, 2020")
+
+barplot(state_2050$pop,names.arg=state_2050$STATE_NAME , las = 2,  ylim = c(0,40000000),  col="#548235",
+        main="Population by State, 2050")
+
+barplot(state_2100$pop,names.arg=state_2100$STATE_NAME ,las = 2, ylim = c(0,40000000), col="#548235",
+        main="Population by State, 2100")
+
+# library(psych)
+describe(counties_2020$pop)
+describe(counties_2050$pop)
+describe(counties_2075$pop)
+describe(counties_2100$pop)
+
+
+years <- c(2020, 2050, 2075, 2100)
+means <- c(15853.4, 29413.3, 42737.9, 57704.6)
+medians <- c(870.85, 1623.87, 2321.91, 3022.29)
+max <- c(3392077, 5136171, 6791160, 8589553)
+range <- c(3392076, 5136170, 6791159, 8589552)
+se <- c(1799.94, 3140.9, 4481.17, 5983.25)
+decrip_stats <- data.frame(years, means, medians, max, range, se)
+
+library(gt)
+library(gtExtras)
+library(remotes)
+remotes::install_github("jthomasmock/gtExtras")
+
+decrip_stats%>%
+  gt() %>%
+  gt_theme_nytimes() %>%
+  tab_header(title = 'Years')
+
+decrip_stats %>%
+  gt() %>%
+  gt_theme_nytimes %>%
+  tab_header(title = 'Population Statistics Per Year') %>%
+  data_color(columns = years, palette = '#BFD3B1') %>%
+  cols_label(
+    years = html('Year'),
+    means = html("Mean"),
+    medians = html('Median'),
+    max = html('Maximum'),
+    se = html('Standard Error'),
+  ) %>%
+  #gt_plt_bar_pct(column = means, scaled = FALSE, fill = 'blue',  background = 'lightblue') %>%
+  gt_plt_bar_pct(column = range, scaled = FALSE, fill = "#3A4E2C", background = "#BFD3B1") %>%
+  cols_align("center", contains("scale")) %>%
+  cols_width(5 ~ px(125))
+
+counties_2020 = subset(counties_2020, select = -c(COUNTY_NAME, STATE_NAME,RACE))
+counties_2020 = subset(counties_2020, select = -c(RACE))
+
+
+#unzip(zipfile='/home/qo3/SspDb_country_data_2013-06-12.csv', exdir = "DATA")
+
+SSPs <- read_csv("/home/qo3/SspDb_country_data_2013-06-12.csv") %>%
+  filter(REGION == "USA",
+         grepl("Population",VARIABLE)) %>%
+  separate(VARIABLE, c("VARIABLE", "VARIABLE1", "VARIABLE2", "VARIABLE3", "VARIABLE4"), by ="|")
+
+# SSPs[c('POPULATION','VARIABLE1', 'VARIABLE2','EDUCATION')] <- str_split_fixed(SSPs$VARIABLE, '|', 4)
+
+SSPs2 <- SSPs %>%
+  dplyr::select(-`1950`:-`2010`, -`2105`:-`2150`) %>%
+  separate(c("VARIABLE1", "VARIABLE2", "EDUCATION"), sep = "|") %>%
+  mutate(SEX = case_when(
+    VARIABLE1 == "Female" ~ 2,
+    VARIABLE1 == "Male" ~ 1),
+    AGE = case_when(
+      VARIABLE2 == "Aged0" ~ 1,
+      VARIABLE2 == "Aged5" ~ 2,
+      VARIABLE2 == "Aged10" ~ 3,
+      VARIABLE2 == "Aged15" ~ 4,
+      VARIABLE2 == "Aged20" ~ 5,
+      VARIABLE2 == "Aged25" ~ 6,
+      VARIABLE2 == "Aged30" ~ 7,
+      VARIABLE2 == "Aged35" ~ 8,
+      VARIABLE2 == "Aged40" ~ 9,
+      VARIABLE2 == "Aged45" ~ 10,
+      VARIABLE2 == "Aged50" ~ 11,
+      VARIABLE2 == "Aged55" ~ 12,
+      VARIABLE2 == "Aged60" ~ 13,
+      VARIABLE2 == "Aged65" ~ 14,
+      VARIABLE2 == "Aged70" ~ 15,
+      VARIABLE2 == "Aged75" ~ 16,
+      VARIABLE2 == "Aged80" ~ 17,
+      VARIABLE2 == "Aged85" ~ 18,
+      VARIABLE2 == "Aged90" ~ 18,
+      VARIABLE2 == "Aged95" ~ 18,
+      VARIABLE2 == "Aged100" ~ 18),
+    SSP = case_when(
+      grepl("SSP1", SCENARIO) ~ "SSP1",
+      grepl("SSP2", SCENARIO) ~ "SSP2",
+      grepl("SSP3", SCENARIO) ~ "SSP3",
+      grepl("SSP4", SCENARIO) ~ "SSP4",
+      grepl("SSP5", SCENARIO) ~ "SSP5"
+    )) %>%
+  filter(is.na(VARIABLE4),
+         !is.na(VARIABLE2)) %>%
+  dplyr::select(-MODEL:-UNIT) %>%
+  na.omit %>%
+  gather(YEAR, Population, `2015`:`2100`) %>%
+  group_by(SEX, AGE, SSP, YEAR) %>%
+  dplyr::summarise(Population = sum(Population)) %>%
+  ungroup() %>%
+  spread(SSP, Population) %>%
+  mutate(YEAR = as.integer(YEAR)
+         # SEX = as.character(SEX))
+  )
+test <- left_join(totals2, SSPs2) %>%
+  mutate(SSP1 = SSP1*percentage*1000000,
+         SSP2 = SSP2*percentage*1000000,
+         SSP3 = SSP3*percentage*1000000,
+         SSP4 = SSP4*percentage*1000000,
+         SSP5 = SSP5*percentage*1000000,
+         GEOID = case_when(
+           GEOID=="46113"~ "46102", # Shannon County (46113)'s name changed to Oglala Lakota (46102)
+           GEOID== "51917" ~ "51019", # Bedford City (51917) is merged into Bedford County (51019)
+           GEOID == "02270" ~ "02158", # Wade Hampton (02270) is actually (02158)
+           TRUE ~ as.character(GEOID))
+  ) %>%
+  select(YEAR, SEX, STATE, COUNTY, GEOID, RACE, AGE, SSP1:SSP5)
+
+test2 <- test %>%
+  group_by(YEAR, STATE) %>%
+  dplyr::summarise(SSP1 = sum(SSP1),
+                   SSP2 = sum(SSP2),
+                   SSP3 = sum(SSP3),
+                   SSP4 = sum(SSP4),
+                   SSP5 = sum(SSP5)) %>%
+  gather(Scenario, Population, SSP1:SSP5)
+
+test3 <- test %>%
+  group_by(YEAR, SEX, STATE, COUNTY, GEOID, RACE, AGE) %>%
+  dplyr::summarise(SSP1 = sum(SSP1),
+                   SSP2 = sum(SSP2),
+                   SSP3 = sum(SSP3),
+                   SSP4 = sum(SSP4),
+                   SSP5 = sum(SSP5))
+
+
+write_csv(test3, "/home/qo3/SSP_asrc.csv")
+write_csv(test2, "/home/qo3/ssp_sums.csv")
+
+unzip(zipfile='/home/qo3/SspDb_country_data_2013-06-12.csv.zip', exdir = "DATA")
+
+SSPs <- read_csv("/home/qo3/SspDb_country_data_2013-06-12.csv") %>%
+  filter(REGION == "USA",
+         grepl("Population",VARIABLE)) %>%
+  separate(VARIABLE, c("VARIABLE", "VARIABLE1", "VARIABLE2", "VARIABLE3", "VARIABLE4"), by ="|")
+
+SSPs2 <- SSPs %>%
+  dplyr::select(-`1950`:-`2010`, -`2105`:-`2150`) %>%
+  mutate(SEX = case_when(
+    VARIABLE1 == "Female" ~ 2,
+    VARIABLE1 == "Male" ~ 1),
+    AGE = case_when(
+      VARIABLE2 == "Aged0" ~ 1,
+      VARIABLE2 == "Aged5" ~ 2,
+      VARIABLE2 == "Aged10" ~ 3,
+      VARIABLE2 == "Aged15" ~ 4,
+      VARIABLE2 == "Aged20" ~ 5,
+      VARIABLE2 == "Aged25" ~ 6,
+      VARIABLE2 == "Aged30" ~ 7,
+      VARIABLE2 == "Aged35" ~ 8,
+      VARIABLE2 == "Aged40" ~ 9,
+      VARIABLE2 == "Aged45" ~ 10,
+      VARIABLE2 == "Aged50" ~ 11,
+      VARIABLE2 == "Aged55" ~ 12,
+      VARIABLE2 == "Aged60" ~ 13,
+      VARIABLE2 == "Aged65" ~ 14,
+      VARIABLE2 == "Aged70" ~ 15,
+      VARIABLE2 == "Aged75" ~ 16,
+      VARIABLE2 == "Aged80" ~ 17,
+      VARIABLE2 == "Aged85" ~ 18,
+      VARIABLE2 == "Aged90" ~ 18,
+      VARIABLE2 == "Aged95" ~ 18,
+      VARIABLE2 == "Aged100" ~ 18),
+    SSP = case_when(
+      grepl("SSP1", SCENARIO) ~ "SSP1",
+      grepl("SSP2", SCENARIO) ~ "SSP2",
+      grepl("SSP3", SCENARIO) ~ "SSP3",
+      grepl("SSP4", SCENARIO) ~ "SSP4",
+      grepl("SSP5", SCENARIO) ~ "SSP5"
+    )) %>%
+  filter(is.na(VARIABLE4),
+         !is.na(VARIABLE2)) %>%
+  dplyr::select(-MODEL:-UNIT) %>%
+  na.omit %>%
+  gather(YEAR, Population, `2015`:`2100`) %>%
+  group_by(SEX, AGE, SSP, YEAR) %>%
+  dplyr::summarise(Population = sum(Population)) %>%
+  ungroup() %>%
+  spread(SSP, Population) %>%
+  mutate(YEAR = as.integer(YEAR)
+         # SEX = as.character(SEX))
+  )
+test <- left_join(totals2, SSPs2) %>%
+  mutate(SSP1 = SSP1*percentage*1000000,
+         SSP2 = SSP2*percentage*1000000,
+         SSP3 = SSP3*percentage*1000000,
+         SSP4 = SSP4*percentage*1000000,
+         SSP5 = SSP5*percentage*1000000,
+         GEOID = case_when(
+           GEOID=="46113"~ "46102", # Shannon County (46113)'s name changed to Oglala Lakota (46102)
+           GEOID== "51917" ~ "51019", # Bedford City (51917) is merged into Bedford County (51019)
+           GEOID == "02270" ~ "02158", # Wade Hampton (02270) is actually (02158)
+           TRUE ~ as.character(GEOID))
+  ) %>%
+  select(YEAR, SEX, STATE, COUNTY, GEOID, RACE, AGE, SSP1:SSP5)
+
+test2 <- test %>%
+  group_by(YEAR, STATE) %>%
+  dplyr::summarise(SSP1 = sum(SSP1),
+                   SSP2 = sum(SSP2),
+                   SSP3 = sum(SSP3),
+                   SSP4 = sum(SSP4),
+                   SSP5 = sum(SSP5)) %>%
+  gather(Scenario, Population, SSP1:SSP5)
+
+test3 <- test %>%
+  group_by(YEAR, SEX, STATE, COUNTY, GEOID, RACE, AGE) %>%
+  dplyr::summarise(SSP1 = sum(SSP1),
+                   SSP2 = sum(SSP2),
+                   SSP3 = sum(SSP3),
+                   SSP4 = sum(SSP4),
+                   SSP5 = sum(SSP5))
+
+
+write_csv(test3, "/home/qo3/SSP_asrc.csv")
+write_csv(test2, "/home/qo3/ssp_sums.csv")
